@@ -5,9 +5,9 @@ account: mondpanther
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 15795140
-bundleId: 11051782
+bundleId:
 url: https://mondpanther.shinyapps.io/avstrax_explorer/
 version: 1
 asMultiple: TRUE
 asStatic: FALSE
-additionalFiles: istraxes/istrax_CN.parquet|istraxes/istrax_EMDEexCN.parquet|istraxes/istrax_nationalkey_2009_2018.parquet|istraxes/istrax_global.parquet|istraxes/istrax_EU.parquet
+additionalFiles: istraxes/istrax_IN.parquet|istraxes/istrax_HIC.parquet

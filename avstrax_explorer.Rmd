@@ -38,7 +38,6 @@ for(ff in files){
 
 
 
-
 techmap <- read_parquet("techmap.parquet")
 
 green_classes <- c("Green Energy", "Green Transport", "Circular Economy", "Green Manufacturing",
