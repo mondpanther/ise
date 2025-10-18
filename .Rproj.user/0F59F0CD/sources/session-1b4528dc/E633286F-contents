@@ -1,18 +1,4 @@
----
-title: "ISE - Industrial Strategy Explorer"
-output: html_document
-runtime: shiny
-resource_files:
-- istraxes/istrax_CN.parquet
-- istraxes/istrax_EMDEexCN.parquet
-- istraxes/istrax_nationalkey_2009_2018.parquet
-- istraxes/istrax_global.parquet
-- istraxes/istrax_EU.parquet
-- istraxes/istrax_IN.parquet
-- istraxes/istrax_HIC.parquet
----
 
-```{r setup, include=FALSE}
 library(shiny)
 library(ggplot2)
 library(countrycode)
@@ -20,25 +6,12 @@ library(plotly)
 library(arrow)
 library(dplyr)
 
-#patchar_countrymap <- read_parquet("patchar_countrymap.parquet")
-
-
-# List all Parquet files in the 'istraxes' directory
-#getwd()
-files <- list.files(path="istraxes", pattern = "\\.parquet$", full.names = TRUE)
-
-
-
-patchar_countrymap=read_parquet("countrymap.parquet")
-for(ff in files){
-  patchar_countrymap=patchar_countrymap %>% left_join(read_parquet(ff))
+# Load data
+files <- list.files(path="istraxes", pattern = "parquet$", full.names = TRUE)
+patchar_countrymap <- read_parquet("countrymap.parquet")
+for (ff in files) {
+  patchar_countrymap <- patchar_countrymap %>% left_join(read_parquet(ff))
 }
-
-
-
-
-
-
 
 techmap <- read_parquet("techmap.parquet")
 
@@ -47,7 +20,6 @@ green_classes <- c("Green Energy", "Green Transport", "Circular Economy", "Green
                    "GHG Capture", "Any Green")
 
 source("istraxfunctions.R")
-
 
 toflow_choices <- c(
   "Global Returns" = "istrax_global",
@@ -78,16 +50,7 @@ get_available_iso2 <- function() {
 }
 
 available_iso2 <- get_available_iso2()
-#iso_ref <- unique(countrycode::codelist[, c("iso2c", "country.name.en", "region", "income")])
-
-
 iso_ref <- unique(countrycode::codelist[, c("iso2c", "country.name.en", "region")])
-#iso_ref$income <- countrycode(iso_ref$iso2c, origin = "iso2c", destination = "wb_income")
-
-
-#iso_ref <- unique(countrycode::codelist[, c("iso2c", "country.name.en", "region")])
-#iso_ref$income <- countrycode::countrycode(iso_ref$iso2c, origin = "iso2c", destination = "wb_income_group")
-
 match_idx <- match(available_iso2, iso_ref$iso2c)
 valid <- !is.na(match_idx)
 vals <- available_iso2[valid]
@@ -105,15 +68,11 @@ lmics <- c("AF","AL","DZ","AO","AR","AM","AZ","BD","BJ","BO","BA","BW","BR","BG"
            "MK","PK","PW","PA","PG","PY","PE","PH","RW","WS","ST","SN","RS","SC",
            "SL","SB","SO","ZA","LK","SD","SR","SY","TJ","TZ","TH","TL","TG","TO",
            "TN","TR","TM","TV","UG","UA","UZ","VU","VE","VN","YE","ZM","ZW")
-  #iso_ref$iso2c[iso_ref$income %in% c("Low income", "Lower middle income", "Upper middle income")]
 lmics_excl_china <- setdiff(lmics, "CN")
-
-#eu_countries <- countrycode::codelist$iso2c[countrycode::codelist$eu28 == TRUE]
 eu_countries <- c("AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR",
                   "HU","IE","IT","LV","LT","LU","MT","NL","PL","PT","RO","SK",
-                  "SI","ES","SE")#countrycode::codelist$iso2c[countrycode::codelist$eu28 == TRUE]
-
-hic <- setdiff(all_countries,lmics)
+                  "SI","ES","SE")
+hic <- setdiff(all_countries, lmics)
 
 group_definitions <- list(
   "All countries" = all_countries,
@@ -126,9 +85,7 @@ group_definitions <- list(
 grouped_choices <- list(
   "Predefined Groups" = lapply(names(group_definitions), function(name) setNames(name, name)),
   "Individual Countries" = as.list(country_choices)
-  
 )
-
 names(grouped_choices[["Predefined Groups"]]) <- names(group_definitions)
 
 default_country <- if ("VN" %in% vals) "VN" else if (length(vals) > 0) vals[1] else NA_character_
@@ -144,65 +101,56 @@ expand_country_selection <- function(selected) {
   unique(expanded)
 }
 
-```
-
-## Controls
-
-```{r controls, echo=FALSE}
-inputPanel(
-  selectizeInput(
-    inputId = "country",
-    label   = "Country or Group",
-    choices = grouped_choices,
-    #selected = default_country,
-    multiple = TRUE,
-    options = list(placeholder = 'Choose one or more countries or groups...')
+# Define UI
+ui <- fluidPage(
+  titlePanel("ISE - Industrial Strategy Explorer"),
+  inputPanel(
+    selectizeInput(
+      inputId = "country",
+      label = "Country or Group",
+      choices = grouped_choices,
+      selected = default_country,
+      multiple = TRUE,
+      options = list(placeholder = 'Choose one or more countries or groups...')
+    ),
+    selectInput(
+      inputId = "toflow",
+      label = "Return flow",
+      choices = toflow_choices,
+      selected = "istrax_global"
+    )
   ),
-  selectInput(
-    inputId = "toflow",
-    label = "Return flow",
-    choices = toflow_choices,
-    selected = "istrax_global"
-  )
+  plotOutput("avstrax_plot", height = "600px")
 )
-```
 
-## Plot
+# Define server
+server <- function(input, output) {
+  output$avstrax_plot <- renderPlot({
+    req(input$country, input$toflow)
 
-```{r server, echo=FALSE}
-output$avstrax_plot <- renderPlot({
-  req(input$country, input$toflow)
-  
-  
-  
-  selected_countries <- expand_country_selection(input$country)
+    selected_countries <- expand_country_selection(input$country)
+    flow_label <- names(toflow_choices)[toflow_choices == input$toflow]
 
-  
-  flow_label <- names(toflow_choices)[toflow_choices == input$toflow]
+    validate(
+      need(exists("plot_avstrax_by_country"), "Function 'plot_avstrax_by_country' not found in the environment."),
+      need(exists("patchar_countrymap"), "Object 'patchar_countrymap' not found."),
+      need(exists("techmap"), "Object 'techmap' not found."),
+      need(exists("green_classes"), "Object 'green_classes' not found."),
+      need(exists("custom_colors"), "Object 'custom_colors' not found.")
+    )
 
-  validate(
-    need(exists("plot_avstrax_by_country"), "Function 'plot_avstrax_by_country' not found in the environment."),
-    need(exists("patchar_countrymap"), "Object 'patchar_countrymap' not found."),
-    need(exists("techmap"), "Object 'techmap' not found."),
-    need(exists("green_classes"), "Object 'green_classes' not found."),
-    need(exists("custom_colors"), "Object 'custom_colors' not found.")
-  )
+    p <- plot_avstrax_by_country(
+      pdata = patchar_countrymap,
+      classes = techmap,
+      green_classes = green_classes,
+      country_code = selected_countries,
+      toflow = input$toflow,
+      custom_colors = custom_colors
+    ) + ggtitle(input$country)
 
-  p <- plot_avstrax_by_country(
-    pdata = patchar_countrymap,
-    classes = techmap,
-    green_classes = green_classes,
-    country_code = selected_countries,
-    toflow = input$toflow,
-    custom_colors = custom_colors
-  ) + ggtitle(input$country)#ggtitle(flow_label) 
+    p
+  })
+}
 
-  p
-})
-
-
-```
-
-```{r plot_ui, echo=FALSE}
-plotOutput("avstrax_plot", height = "600px")
-```
+# Run the app
+shinyApp(ui = ui, server = server)
