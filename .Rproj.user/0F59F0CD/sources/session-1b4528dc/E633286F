@@ -3,7 +3,7 @@
     "path": "C:/Users/rmartin7/GitHub/ise/avstrax_explorer_app.R",
     "project_path": "avstrax_explorer_app.R",
     "type": "r_source",
-    "hash": "1706228940",
+    "hash": "4262919746",
     "contents": "",
     "dirty": false,
     "created": 1760787811008.0,
@@ -12,15 +12,15 @@
     "properties": {
         "source_window_id": "",
         "Source": "Source",
-        "cursorPosition": "10,0",
+        "cursorPosition": "9,1",
         "scrollLine": "0"
     },
     "folds": "",
-    "lastKnownWriteTime": 1760787846,
+    "lastKnownWriteTime": 1760788114,
     "encoding": "UTF-8",
     "collab_server": "",
     "source_window": "",
-    "last_content_update": 1760787846550,
+    "last_content_update": 1760788114392,
     "read_only": false,
     "read_only_alternatives": []
 }

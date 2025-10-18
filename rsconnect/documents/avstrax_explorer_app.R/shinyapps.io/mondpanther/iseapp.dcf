@@ -1,0 +1,12 @@
+name: iseapp
+title: iseapp
+username: mondpanther
+account: mondpanther
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 15795359
+bundleId:
+url: https://mondpanther.shinyapps.io/iseapp/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE

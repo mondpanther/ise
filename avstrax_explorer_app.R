@@ -6,6 +6,9 @@ library(plotly)
 library(arrow)
 library(dplyr)
 
+
+#rsconnect::writeManifest()
+
 # Load data
 files <- list.files(path="istraxes", pattern = "parquet$", full.names = TRUE)
 patchar_countrymap <- read_parquet("countrymap.parquet")
