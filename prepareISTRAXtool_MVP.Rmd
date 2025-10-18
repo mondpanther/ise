@@ -1,0 +1,539 @@
+---
+title: "Prepare ISTRAX tool"
+output:
+  #word_document: default
+  html_document: default
+date: "2025-09-04"
+---
+
+
+
+# Pulling data together
+
+This pulls the data together we already have in our directory. Ultimately we want to merge this into a more dynamic data pipeline that ideally access the the PATSTAT API.
+
+Note that all directory links are relative so you should be able to find all underlying datasets.
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE,warning=FALSE,fig.width = 9,fig.height = 10,dpi=2200)
+source("../code/helpers.r")
+library(dplyr)
+library(readr)
+
+```
+
+
+
+
+I am pulling various datasets we have in the one drive to create three datastructures. Eventually we should establish a datapipeline that pulls that data from the PATSTAT API pipeline. All data should be in the shared drive and paths are relative so it should all work on your machines.
+
+1. A dataset at the patent families (docdb level) with various family charactistics that we might want to show (patchar)
+
+2. A dataset that maps patents to countrys (countrymap). Currently that's done via inventor locations. Note because the same inno can have innovators in multiple countries. The countrymap dataset includes - at least for now - also a national istrax variable. This is a variable which computes istrax such that only spillovers are considered that benefit the source country (i.e. for innovations linked to India say it is flows to other innovators in India). The long term goal - somebody; e.g. Denis, needs to re-run the algorithm for all countries - to have in the patchar dataset a to flow istrax column for every country and country group of interest. Once we have that national istrax is contained in this information.
+
+3. A dataset that maps patent families to technology classes (techmap, again a family can be in multiple).
+(Maybe in the medium run we want to replace that with a mapping of all patents to CPC subclasses combined with a separate - and much smaller - mapping from subclasses to specific technology tags)
+
+
+
+4. We combine 1 & 2 to create patchar_countrymap, which is now more convenient for simply computing bar charts with national vs global spillovers istrax.
+
+
+## Build mapping from patents to countries (countrymap)
+
+```{r}
+library(readr)
+library(dplyr)
+library(wbstats)
+library(arrow)
+library(readr)
+library(data.table)
+
+
+
+
+url="../../data/patent_data/patbis2021/data/fromWATSON/innos_ctry_indicators.dsv"
+
+
+#url="../../data/patent_data/patbis2021/data/fromWATSON/innos_istraxfield_nationalkey_2009_2018.dsv"
+
+countrymap <- read_tsv(url)
+#countrymap=countrymap %>% distinct(docdb_family_id,ctry_code,istrax) %>% rename(istrax_nationalkey_2009_2018=istrax)
+countrymap=countrymap %>% distinct(docdb_family_id,ctry_code,istrax_nationalkey_2009_2018)
+
+```
+
+
+
+
+## Build patchar
+
+
+```{r}
+
+url2="../../data/patent_data/patbis2021/data/fromWATSON/innos_istraxfield_global_2009_2018.dsv"
+patchar=read_tsv(url2) %>%  select(docdb_family_id,istrax,alphapvyear_2009_2018,costpvyear_2009_2018,pv,ev) %>% rename(istrax_global=istrax) %>% 
+   rename(cost=costpvyear_2009_2018,alpha=alphapvyear_2009_2018)
+
+#library(fixest)
+#reg=fepois(pv~ev,patchar) 
+#reg %>% summary()
+
+
+
+
+
+
+```
+
+
+
+## Build patchar_countrymap
+
+```{r}
+
+
+
+
+patchar_countrymap = read_tsv(url) %>% select(docdb_family_id,ctry_code,
+                            earliest_filing_date,earliest_filing_year,
+                            docdb_family_size,
+                            istrax_nationalkey_2009_2018) #%>% rename(istrax_nationalkey_2009_2018=istrax)
+
+#...assuming this covers national we need global....
+
+#test=
+```
+
+## Build More ISTRAX (we only have EV on file so still need to apply the istrax formula)
+
+
+The formula is
+
+$$\frac{1}{c}\times EV \times \left(\alpha-\alpha \times I\{PV>2 c\}+I\{PV<2 c\}\right) $$
+$$=\frac{1}{c}\times EV \times \left(\alpha-\alpha \times I\{PV>2 c\}+\left(1-I\{PV>2 c\}\right)\right) $$
+$$=\frac{1}{c}\times EV \times \left(1+\alpha-\left(\alpha+1\right) \times I\{PV>2 c\}\right) $$
+$$=\frac{\alpha+1}{c}\times EV \times\left(1-  I\{PV>2 c\}\right) $$
+
+## combine EVs
+
+```{r}
+
+
+
+
+
+library(rlang)
+
+
+
+
+flist = c( "CN","emde","eu","euplusuk","g7","IN" )
+for(ff in flist){
+  ff=ff %>% toupper()
+  newev=paste0("ev_",ff)
+  jurl=paste0("../../data/patent_data/patbis2021/data/fromWATSON/innos_ev_",ff,"_2009_2018.dsv")
+  newdf=read_tsv(jurl)
+  ev_var_name <- names(newdf)[startsWith(names(newdf), "ev")]
+  newdf=newdf %>% select(docdb_family_id,starts_with("ev")) %>% rename( !!newev:=!!sym(ev_var_name) )
+  
+  patchar=patchar %>% left_join( newdf )
+}
+
+
+
+patchar=patchar   %>% distinct() %>% 
+  mutate(ev_EMDE=ev_EMDE+ev_CN,
+         ev_EMDEexCN=ev_EMDE-ev_CN  ,
+         ev_EMDEexCNIN=ev_EMDE-ev_CN-ev_IN,
+         ev_HIC=ev-ev_EMDE,
+         ev_test=ev_EMDE-ev_IN) 
+  
+  
+
+test=patchar  %>% filter(ev_EMDEexCNIN<0)
+test2=patchar %>% filter(ev_EMDEexCN<0)
+test3=patchar %>% filter(ev_test<0)
+test4=patchar %>% filter(ev_EMDE>ev)
+```
+
+Making Istraxes
+
+```{r}
+
+
+library(dplyr)
+library(stringr)
+
+# Optionally guard against division by zero:
+# patchar <- patchar %>% mutate(cost = na_if(cost, 0))
+
+patchar <- patchar %>%
+  # Create istrax_* columns for every ev_* column
+  mutate(
+    across(
+      .cols = starts_with("ev_"),
+      .fns  = ~ ((alpha + 1) / cost) * .x * as.integer(pv <= 2 * cost),
+      .names = "istrax_{.col}"      # temporary names: istrax_ev_XXX
+    )
+  ) %>%
+  # Drop the extra "ev_" in the new names: istrax_ev_XXX -> istrax_XXX
+  rename_with(~ str_replace(., "^istrax_ev_", "istrax_"), starts_with("istrax_ev_"))
+
+
+
+
+
+```
+
+
+
+
+
+
+## Build patchar_countrymap
+
+
+```{r}
+
+
+
+
+
+
+
+# Add global istrax to patchar_countrympa
+patchar_countrymap = patchar_countrymap %>% left_join(patchar) %>% select(-starts_with("ev_"))
+
+# Note: we have loads of innovations which are not mapped to countries...
+
+
+
+#test2=test %>% select(docdb_family_id)
+
+
+```
+
+
+
+## Build techmap
+
+```{r}
+url="../patent analysis/Data/Other data/docdb_tech_class.csv"
+
+techmap=fread(url)
+techmap=techmap %>% arrange(docdb_family_id) %>% filter(technology!="")
+#head(classes)
+#classes %>% distinct(technology)
+
+green_classes=c("Green Energy",
+                "Green Transport",
+                "Circular Economy",
+                "Green Manufacturing",
+                "Adaptation",
+                "Green Housing",
+                "Green ICT",
+                "Green Agriculture",
+                "GHG Capture",
+                "Any Green")
+
+#classes = classes %>% mutate(green_id=technology %in%  green_classes)
+
+#classes %>% distinct(technology)
+
+
+
+#url="../patent analysis/Data/Other data/docdb_green_or_not.csv"
+
+
+# Add a mapping to green.... Sam, double check if you agree...
+
+url="../../data/patent_data/Y02_docdb_family_id_patstat2021.dsv"
+greenornot=fread(url) %>% mutate(technology="Any Green") %>% select(docdb_family_id, technology)
+#head(greenornot)
+techmap=techmap %>% bind_rows(greenornot) %>% distinct()
+
+
+```
+
+
+### Save stuff
+
+```{r}
+
+library(arrow)
+
+# Save patchar_countrymap as patchar_countrymap.parquet
+write_parquet(patchar_countrymap, "patchar_countrymap.parquet")
+
+# Save techmap as techmap.parquet
+write_parquet(techmap, "techmap.parquet")
+
+
+```
+
+
+
+
+# Analysis
+
+
+```{r}
+source("istraxfunctions.r")
+
+```
+
+## Global vs National ISTRAX
+
+Here we compare returns from further innovation at  global vs national spillovers. Note: going forward we want to add further scopes; e.g. LMIC istrax where only spillovers to LMICs are considered.
+
+
+
+
+## Vietnam
+
+toflowlabels:    Global Returns, National Returns, Returns within LMICs (excl. China), Returns within HICs
+  
+toflowcatnames:  istrax_global, istrax_nationalkey_2009_2018, istrax_EMDEexCN, istrax_HIC
+
+
+
+
+```{r}
+
+
+
+
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap, 
+                        green_classes, 
+                        country_code="VN", 
+                        toflow="istrax_global", 
+                        custom_colors)+ggtitle("Global Returns")
+
+plot_avstrax_by_country(patchar_countrymap,
+                        techmap,
+                        green_classes, 
+                        country_code="VN", 
+                        toflow="istrax_nationalkey_2009_2018", 
+                        custom_colors)+ggtitle("National Returns")
+
+plot_avstrax_by_country(patchar_countrymap,
+                        techmap,
+                        green_classes, 
+                        country_code="VN", 
+                        toflow="istrax_EMDEexCN", 
+                        custom_colors)+ggtitle("Returns within LMICs (excl. China)")
+
+
+
+```
+
+
+## All dvelopping (ex China)
+
+
+```{r}
+
+lmics=c("AF","AL","DZ","AO","AR","AM","AZ","BD","BJ","BO","BA","BW","BR","BG","BF","BI","KH","CM","CV","CF","TD","CL","CO","KM","CG","CR","CI","CU","DJ","DM","DO","EC","EG","SV","GQ","ER","ET","FJ","GA","GM","GE","GH","GT","GN","GW","GY","HT","HN","IN","ID","IR","IQ","JM","JO","KZ","KE","KI","KP","KG","LA","LB","LS","LR","LY","MG","MW","MY","MV","ML","MR","MU","MX","MD","MN","ME","MA","MZ","MM","NA","NP","NI","NE","NG","MK","PK","PW","PA","PG","PY","PE","PH","RW","WS","ST","SN","RS","SC","SL","SB","SO","ZA","LK","SD","SR","SY","TJ","TZ","TH","TL","TG","TO","TN","TR","TM","TV","UG","UA","UZ","VU","VE","VN","YE","ZM","ZW")
+
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap,
+                        green_classes, 
+                        country_code=lmics, 
+                        toflow="istrax_global", 
+                        custom_colors)+ggtitle("Global Returns")
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap,
+                         green_classes, 
+                        country_code=lmics, 
+                        toflow="istrax_nationalkey_2009_2018", 
+                        custom_colors)+ggtitle("National Returns")
+```
+
+
+## China
+
+```{r}
+
+
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap,
+                        green_classes, 
+                        country_code="CN", 
+                        toflow="istrax_global", 
+                        custom_colors)+ggtitle("Global Returns")
+
+plot_avstrax_by_country( patchar_countrymap, 
+                        techmap,
+                        green_classes, 
+                        country_code="CN", 
+                        toflow="istrax_nationalkey_2009_2018", 
+                        custom_colors)+ggtitle("National Returns")
+
+
+
+
+```
+
+
+Africa only?
+
+```{r}
+
+lmics=c("TD","DZ","DJ","MZ","GM","GN","UG","GH","SN","ER",
+        "CG","MA","TN","CM","MW","SD","NG","SO","EG","SL",
+        "BF","BJ","ML","NE","MG","RW","CD","EH","CV","GW",
+        "LR","ZA","SZ","ZM","KE","MR","TZ","LY","ZW","TG",
+        "CF","ET","LS","GQ","KM","GA","CI","BI")
+
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap,
+                        green_classes, 
+                        country_code=lmics, 
+                        toflow="istrax_global", 
+                        custom_colors)+ggtitle("Global Returns")
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap, 
+                         green_classes, 
+                        country_code=lmics, 
+                        toflow="istrax_nationalkey_2009_2018", 
+                        custom_colors)+ggtitle("National Returns")
+
+
+
+```
+
+
+
+# Turkey
+
+```{r}
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap,
+                        green_classes, 
+                        country_code="TR", 
+                        toflow="istrax_global", 
+                        custom_colors)+ggtitle("Global Returns")
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap, green_classes, 
+                        country_code="TR", 
+                        toflow="istrax_nationalkey_2009_2018", 
+                        custom_colors)+ggtitle("National Returns")
+
+
+
+```
+
+
+
+
+# India
+
+```{r}
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap,
+                        green_classes, 
+                        country_code="IN", 
+                        toflow="istrax_global", 
+                        custom_colors)+ggtitle("Global Returns")
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap, green_classes, 
+                        country_code="IN", 
+                        toflow="istrax_nationalkey_2009_2018", 
+                        custom_colors)+ggtitle("National Returns")
+
+
+
+```
+
+# South Africa
+
+```{r}
+
+test=patchar_countrymap %>% filter(ctry_code=="ZA")
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap,green_classes ,
+                        country_code="ZA", 
+                        toflow="istrax_global", 
+                        custom_colors)+ggtitle("Global Returns")
+
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap, green_classes, 
+                        country_code="ZA", 
+                        toflow="istrax_nationalkey_2009_2018", 
+                        custom_colors)+ggtitle("National Returns")
+
+
+
+
+
+
+
+
+```
+
+
+
+
+
+# UK
+
+```{r}
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap, 
+                        green_classes, 
+                        country_code="GB", 
+                        toflow="istrax_global", 
+                        custom_colors)+ggtitle("Global Returns")
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap,
+                        green_classes ,
+                        country_code="GB", 
+                        toflow="istrax_nationalkey_2009_2018", 
+                        custom_colors)+ggtitle("National Returns")
+
+
+
+```
+
+
+
+# Germany
+
+```{r}
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap,
+                        green_classes , 
+                        country_code="DE", 
+                        toflow="istrax_global", 
+                        custom_colors)+ggtitle("Global Returns")
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap,
+                        green_classes ,
+                        country_code="DE", 
+                        toflow="istrax_nationalkey_2009_2018", 
+                        custom_colors)+ggtitle("National Returns")
+
+
+
+```
+
